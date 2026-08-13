@@ -3,7 +3,7 @@
 import unittest
 
 from src.config import Filters, Search
-from src.matching import best_match, evaluate
+from src.matching import best_match, evaluate, rejection_reason
 from src.models import Job
 
 
@@ -187,6 +187,23 @@ class ScoreAndSelectionTests(unittest.TestCase):
     def test_malformed_job_does_not_raise(self):
         job = Job(board="test", title="", company="", url="", description="")
         self.assertIsNone(best_match(job, [make_search()]))
+
+
+class RejectionReasonTests(unittest.TestCase):
+    def test_a_single_search_gives_the_bare_reason(self):
+        reason = rejection_reason(make_job(title="Chef"), [make_search()])
+        self.assertEqual(reason, "no title match")
+
+    def test_several_searches_are_named_so_the_reasons_can_be_told_apart(self):
+        searches = [
+            make_search(name="Blue"),
+            make_search(name="Red", titles=Filters(include=("Chef",))),
+        ]
+        reason = rejection_reason(make_job(title="Truck Driver"), searches)
+        self.assertEqual(reason, "Blue: no title match; Red: no title match")
+
+    def test_a_job_that_matches_has_no_reason(self):
+        self.assertEqual(rejection_reason(make_job(), [make_search()]), "")
 
 
 if __name__ == "__main__":

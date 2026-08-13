@@ -159,6 +159,30 @@ class CycleTests(unittest.TestCase):
         run_cycle(cfg, [source], self.store, self.notifier)
         self.assertEqual(self.sent_titles(), [])
 
+    def test_a_job_dropped_after_enrichment_says_why(self):
+        """Matching one job and sending none has to be explained, not just reported."""
+        source = FakeSource([make_job(1)])
+        cfg = make_config(
+            searches=(
+                Search(
+                    name="Test",
+                    titles=Filters(include=("Security Analyst",)),
+                    keywords=Filters(exclude=("EDR",)),
+                ),
+            )
+        )
+        with self.assertLogs("jobjacker", level="INFO") as logs:
+            run_cycle(cfg, [source], self.store, self.notifier)
+        output = " ".join(logs.output)
+        self.assertIn("stopped matching once the full posting was read", output)
+        self.assertIn("excluded keyword: EDR", output)
+
+    def test_nothing_is_explained_when_nothing_was_dropped(self):
+        source = FakeSource([make_job(1)])
+        with self.assertLogs("jobjacker", level="INFO") as logs:
+            run_cycle(make_config(), [source], self.store, self.notifier)
+        self.assertNotIn("stopped matching", " ".join(logs.output))
+
     def test_dry_run_leaves_the_state_file_untouched(self):
         source = FakeSource([make_job(1)])
         notifier = Notifier("https://discord.com/api/webhooks/1/token", self.session, dry_run=True)
@@ -234,6 +258,16 @@ class ClearStateTests(unittest.TestCase):
             clear_state(parse_args(["--clear-http-cache"]), self.store)
         self.assertEqual(self.store.count(), 1)
         self.assertEqual(self.store.get_validators("https://example.com/feed"), (None, None))
+
+    def test_an_empty_record_is_reported_as_empty(self):
+        self.store.forget_all()
+        self.store.clear_validators()
+        args = parse_args(["--forget-jobs", "--clear-http-cache"])
+        with self.assertLogs("jobjacker", level="INFO") as logs:
+            clear_state(args, self.store)
+        output = " ".join(logs.output)
+        self.assertIn("nothing to forget", output)
+        self.assertIn("nothing to clear", output)
 
     def test_a_dry_run_clears_nothing(self):
         args = parse_args(["--forget-jobs", "--clear-http-cache", "--dry-run"])

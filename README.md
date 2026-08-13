@@ -322,10 +322,14 @@ A normal cycle looks like this:
 [12:00:12] Remote OK: 100 jobs discovered
 [12:00:15] RSS (We Work Remotely): 100 jobs discovered
 [12:00:15] 15 of 242 jobs matched your searches
-[12:00:15] 11 already sent previously, skipping
+[12:00:15] 9 already sent previously, skipping
+[12:00:22] 2 jobs stopped matching once the full posting was read: no keyword match
 [12:00:23] 4 new jobs sent to Discord
 [12:00:23] Next check in 60 minutes
 ```
+
+Every line that reduces the count says why it did, so a cycle that sends nothing
+still tells you what happened to each job.
 
 **The first real run does not post any jobs.** Starting up with an empty state file
 would dump every currently open matching job into your channel, so instead it
@@ -507,11 +511,16 @@ python -m src.main --forget-jobs
 docker compose run --rm job-jacker --forget-jobs
 ```
 
-It reports what it removed:
+It reports what it removed, and tells you plainly when there was nothing there:
 
 ```
 [15:26:55] Forgot 2 sent job(s). The next run starts from scratch, which means the first-run rules apply again.
+[15:27:10] No sent jobs were on record, so there was nothing to forget
 ```
+
+That second line is normal on a setup that has not sent anything yet. `--test-config`
+prints the same figure as `Jobs on record`, and it appears in the startup line of
+every run.
 
 Read that last part before you use it. An empty record means the next run is a
 first run, so by default it quietly re-records everything instead of posting it,
@@ -673,6 +682,25 @@ Check a corrected one on its own with `--only greenhouse --dry-run --run-once`.
 **A source reports 0 jobs but no error.** Look for "is unchanged since the last
 check". Nothing changed since last time, so it was not downloaded again. If you
 believe that is wrong, `--clear-http-cache` forces a full download next cycle.
+
+**Jobs matched, but none were sent.** Two different things produce this, and the log
+distinguishes them. "N already sent previously, skipping" means you have had them
+before. "N jobs stopped matching once the full posting was read" means they passed
+on title, company and location, then failed once `fetch_details` fetched the
+description; the line names the filter responsible:
+
+```
+[21:02:15] 1 job stopped matching once the full posting was read: no keyword match
+```
+
+That is `keywords.include` doing its job, and it is the usual reason a search with a
+long keyword list sends almost nothing. Loosen or shorten that list, or set
+`fetch_details: false` to stop testing keywords against descriptions at all.
+
+**`--forget-jobs` says it forgot 0.** The record was already empty, which is normal
+if no cycle has ever sent anything. `--test-config` shows the same number as `Jobs
+on record`. Note that ETags are stored separately, so a board can still say
+"unchanged since the last check" while no jobs are recorded at all.
 
 **The same job keeps arriving.** The board is publishing it with a new id or URL
 each time, so it looks like a different posting. Check `state.retention_days`, and

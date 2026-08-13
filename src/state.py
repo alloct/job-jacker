@@ -135,9 +135,12 @@ class Store:
 
     def forget_all(self) -> int:
         """Empty the sent-job record, so everything still open counts as new again."""
+        # Counted before the delete: SQLite does not always report a row count for a
+        # DELETE with no WHERE clause, and a wrong zero here would be misleading.
+        removed = self.count()
         with self.connection:
-            cursor = self.connection.execute("DELETE FROM sent_jobs")
-        return cursor.rowcount or 0
+            self.connection.execute("DELETE FROM sent_jobs")
+        return removed
 
     def get_validators(self, url: str) -> tuple[str | None, str | None]:
         row = self.connection.execute(
@@ -162,6 +165,7 @@ class Store:
         Called after any cycle that failed to deliver something, so a cached 304
         can never hide a job we have not sent yet.
         """
+        removed = int(self.connection.execute("SELECT COUNT(*) FROM http_cache").fetchone()[0])
         with self.connection:
-            cursor = self.connection.execute("DELETE FROM http_cache")
-        return cursor.rowcount or 0
+            self.connection.execute("DELETE FROM http_cache")
+        return removed

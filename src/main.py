@@ -14,6 +14,7 @@ import logging
 import signal
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import requests
@@ -22,7 +23,7 @@ from . import config as config_module
 from . import sources as sources_module
 from .config import ConfigError
 from .http_client import HttpClient
-from .matching import best_match
+from .matching import best_match, rejection_reason
 from .notify import Notifier, send_test_message
 from .state import Store
 
@@ -166,12 +167,29 @@ def run_cycle(cfg, sources, store: Store, notifier: Notifier) -> bool:
 
     # Second pass, now that descriptions and employment types may have arrived.
     confirmed = []
+    dropped = []
     for _source, job, result in unsent:
         final = best_match(job, cfg.searches)
         if final:
             confirmed.append((job, final))
         else:
+            dropped.append(job)
             log.debug("%s at %s dropped after reading its details", job.title, job.company)
+
+    if dropped:
+        # Without this, a cycle that matches something and sends nothing looks broken.
+        counted = Counter(
+            rejection_reason(job, cfg.searches) or "no longer matched" for job in dropped
+        )
+        log.info(
+            "%d %s stopped matching once the full posting was read: %s",
+            len(dropped),
+            "job" if len(dropped) == 1 else "jobs",
+            "; ".join(
+                reason if count == 1 else f"{reason} (x{count})"
+                for reason, count in counted.most_common()
+            ),
+        )
 
     if not confirmed:
         log.info("No new jobs to send")
@@ -225,10 +243,12 @@ def _prune(store: Store, cfg, dry_run: bool) -> None:
         log.debug("Forgot %d job(s) older than %d days", removed, cfg.retention_days)
 
 
-def describe(cfg, sources) -> None:
+def describe(cfg, sources, recorded: int | None = None) -> None:
     print("Configuration is valid.\n")
     print(f"  Interval        : every {cfg.interval_minutes} minutes")
     print(f"  State file      : {cfg.state_path}")
+    if recorded is not None:
+        print(f"  Jobs on record  : {recorded}")
     print(f"  Discord webhook : {'set' if cfg.webhook_url else 'not set'}")
     print(f"  Sources ({len(sources)}):")
     for source in sources:
@@ -259,16 +279,24 @@ def clear_state(args, store) -> int:
         log.info("Dry run: the state file was left alone")
         return 0
     if args.forget_jobs:
-        log.info(
-            "Forgot %d sent job(s). The next run starts from scratch, which means the "
-            "first-run rules apply again.",
-            store.forget_all(),
-        )
+        forgotten = store.forget_all()
+        if forgotten:
+            log.info(
+                "Forgot %d sent job(s). The next run starts from scratch, which means the "
+                "first-run rules apply again.",
+                forgotten,
+            )
+        else:
+            log.info("No sent jobs were on record, so there was nothing to forget")
     if args.clear_http_cache:
-        log.info(
-            "Cleared %d cached validator(s). Every list will be downloaded in full next run.",
-            store.clear_validators(),
-        )
+        cleared = store.clear_validators()
+        if cleared:
+            log.info(
+                "Cleared %d cached validator(s). Every list will be downloaded in full next run.",
+                cleared,
+            )
+        else:
+            log.info("No cached validators were stored, so there was nothing to clear")
     return 0
 
 
@@ -331,18 +359,18 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
 
             if args.test_config:
-                describe(cfg, built)
+                describe(cfg, built, store.count())
                 return 0
 
             log.info(
-                "Job Jacker started: %d source(s), %d search(es), checking every %d minutes"
-                "%s",
+                "Job Jacker started: %d source(s), %d search(es), %d job(s) already on record, "
+                "checking every %d minutes%s",
                 len(built),
                 len(cfg.searches),
+                store.count(),
                 cfg.interval_minutes,
                 " (dry run)" if args.dry_run else "",
             )
-            log.debug("State file holds %d previously sent job(s)", store.count())
 
             return _loop(cfg, built, store, notifier, client, args)
     finally:

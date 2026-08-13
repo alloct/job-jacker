@@ -203,3 +203,17 @@ def best_match(job, searches) -> MatchResult | None:
         if result.matched and (best is None or result.score > best.score):
             best = result
     return best
+
+
+def rejection_reason(job, searches) -> str:
+    """Why every search turned this job down, for explaining a drop in the log."""
+    reasons = []
+    for search in searches:
+        result = evaluate(job, search)
+        if result.matched:
+            return ""
+        if result.rejected_by:
+            reasons.append(
+                result.rejected_by if len(searches) == 1 else f"{search.name}: {result.rejected_by}"
+            )
+    return "; ".join(reasons)
