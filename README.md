@@ -22,6 +22,7 @@ job boards -> normalize -> filter -> deduplicate -> Discord
 - [How matching works](#how-matching-works)
 - [Running it](#running-it)
 - [Running with Docker](#running-with-docker)
+- [Everyday commands](#everyday-commands)
 - [Adding a job source](#adding-a-job-source)
 - [Troubleshooting](#troubleshooting)
 - [How it behaves toward job boards](#how-it-behaves-toward-job-boards)
@@ -98,7 +99,7 @@ are better than any aggregator.
 Python 3.10 or newer.
 
 ```bash
-git clone https://github.com/YOUR_NAME/job-jacker.git
+git clone https://github.com/alloct/job-jacker.git
 cd job-jacker
 python -m venv .venv
 ```
@@ -141,7 +142,7 @@ discord:
   webhook_url: "REPLACE_WITH_YOUR_DISCORD_WEBHOOK_URL"
 
 http:
-  user_agent: "job-jacker/1.0 (+https://github.com/YOUR_NAME/job-jacker)"
+  user_agent: "job-jacker/1.0 (+https://github.com/alloct/job-jacker)"
   delay_seconds: 2
 
 state:
@@ -240,19 +241,21 @@ requires that total.
 python -m src.main
 ```
 
-That runs until you stop it with Ctrl+C. Useful flags:
+That runs until you stop it with Ctrl+C. The flags:
 
-```bash
-python -m src.main --test-config   # check the config and print a summary, fetch nothing
-python -m src.main --run-once      # one cycle, then exit
-python -m src.main --dry-run       # log what would be sent; send nothing, save nothing
-python -m src.main --verbose       # debug detail, including why jobs were dropped
-python -m src.main --config other.yaml
-```
+| Flag | What it does |
+| --- | --- |
+| `--test-config` | Validate the config, print a summary, fetch nothing |
+| `--test-webhook` | Post one sample job to Discord, then exit |
+| `--run-once` | One cycle, then exit |
+| `--dry-run` | Log what would be sent; send nothing, save nothing |
+| `--only BOARD` | Check just that board. Repeatable |
+| `--verbose` | Debug detail, including why each job was kept or dropped |
+| `--config PATH` | Use a config file other than `./config.yaml` |
 
-`--dry-run` needs no webhook at all, so it is the fastest way to see whether your
-filters do what you meant. Combine it with `--verbose` to see the exact Discord
-payload.
+They combine. `--dry-run` needs no webhook at all, so `--dry-run --run-once
+--verbose` is the fastest way to see whether your filters do what you meant, and
+it prints the exact Discord payload without touching the state file.
 
 A normal cycle looks like this:
 
@@ -277,11 +280,43 @@ that first batch, set `notify_on_first_run: true`.
 That does not apply to `--dry-run`, which records nothing and so always shows you
 its matches.
 
-To run on a schedule instead of continuously, use `--run-once` from cron or Task
-Scheduler:
+To run on a schedule instead of continuously, use `--run-once` from cron:
 
 ```
 0 * * * * cd /opt/job-jacker && .venv/bin/python -m src.main --run-once >> data/cron.log 2>&1
+```
+
+or hourly from Windows Task Scheduler:
+
+```
+schtasks /create /tn "Job Jacker" /sc hourly /tr "cmd /c cd /d C:\job-jacker && .venv\Scripts\python.exe -m src.main --run-once >> data\task.log 2>&1"
+```
+
+Both need the `cd`: the config path and the state path are relative to the working
+directory.
+
+To keep the continuous process alive across reboots and crashes on Linux, without
+Docker, `/etc/systemd/system/job-jacker.service`:
+
+```ini
+[Unit]
+Description=Job Jacker
+After=network-online.target
+
+[Service]
+User=jobjacker
+WorkingDirectory=/opt/job-jacker
+Environment=DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+ExecStart=/opt/job-jacker/.venv/bin/python -m src.main
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now job-jacker
 ```
 
 Deduplication lives in the state file, not in memory, so restarting or switching
@@ -317,7 +352,104 @@ docker run -d --name job-jacker \
 One cycle and out:
 
 ```bash
-docker compose run --rm job-jacker --config /app/config.yaml --run-once
+docker compose run --rm job-jacker --run-once
+```
+
+Every flag listed under [Running it](#running-it) works the same way there.
+`docker compose run` replaces the container's default arguments, and the config is
+still found at `/app/config.yaml`.
+
+## Everyday commands
+
+The local commands assume you are in the project directory with the virtualenv
+active. The Docker forms do the same thing.
+
+**Send a test notification.** Posts one made-up job to your channel and exits.
+Do this after creating the webhook, after moving to another machine, and any time
+notifications stop arriving.
+
+```bash
+python -m src.main --test-webhook
+docker compose run --rm job-jacker --test-webhook
+```
+
+**Check a config change before it goes live.** Neither of these contacts a job
+board or Discord.
+
+```bash
+python -m src.main --test-config
+python -m src.main --dry-run --run-once --verbose
+```
+
+**Run a check right now**, outside the schedule, sending and recording as usual:
+
+```bash
+python -m src.main --run-once
+docker compose run --rm job-jacker --run-once
+```
+
+An ad-hoc run shares the state file with any instance already running, so it will
+not resend jobs that have been announced before.
+
+**Check one board** when you are chasing a problem with it, leaving the others
+out of the output:
+
+```bash
+python -m src.main --only linkedin --dry-run --run-once --verbose
+```
+
+**Read the logs.** Everything goes to the console. Uncomment `log.file` in
+`config.yaml` to also write to a file, which is what you want under systemd or
+Task Scheduler.
+
+```bash
+docker compose logs -f --tail 100         # Docker
+journalctl -u job-jacker -f               # systemd
+tail -f data/job-jacker.log               # log.file is set
+Get-Content data\job-jacker.log -Wait     # the same on Windows
+```
+
+**Stop, start and restart.** Locally it is Ctrl+C and run it again; nothing is
+lost either way.
+
+```bash
+docker compose restart                    # Docker
+docker compose down                       # stop and remove the container
+sudo systemctl restart job-jacker         # systemd
+```
+
+**Update to a newer version.** Config and state carry over untouched.
+
+```bash
+git pull
+pip install -r requirements.txt           # only matters if the dependencies changed
+python -m src.main --test-config          # confirm your config still validates
+docker compose up -d --build              # Docker: rebuild and restart in one step
+```
+
+Compare your `config.yaml` against `config.example.yaml` after an update to see
+whether new options appeared. Unknown keys are rejected rather than ignored, so a
+config that validates is a config the new version fully understands.
+
+**See what it has already sent.** This needs the `sqlite3` command-line tool, which
+is a separate download from the Python module of the same name.
+
+```bash
+sqlite3 data/state.sqlite3 "select sent_at, board, company, title from sent_jobs order by sent_at desc limit 20;"
+```
+
+**Make it forget one job** so the next cycle announces it again:
+
+```bash
+sqlite3 data/state.sqlite3 "delete from sent_jobs where title like '%Security Analyst%';"
+```
+
+**Start over completely.** Stop it first, then delete the state file. The next run
+is treated as a first run, so it records everything currently open without posting
+it.
+
+```bash
+rm data/state.sqlite3*                    # del data\state.sqlite3* on Windows
 ```
 
 ## Adding a job source
@@ -396,14 +528,20 @@ Notes:
 
 ## Troubleshooting
 
-Start with `--test-config`, then `--dry-run --verbose`. The latter prints one line
-per job explaining what happened, including which filter rejected it.
+Three commands answer most questions, in this order:
 
-**Nothing arrives in Discord.** If it was the first run, that is intended; look
-for the "First run: recording N existing matches" line and check the channel for
-the "watching" message. Otherwise check the count lines: "0 jobs discovered" means
-the boards gave you nothing, while "0 of 240 jobs matched" means your filters are
-too narrow. Loosen one group at a time.
+```bash
+python -m src.main --test-config                  # is the config valid
+python -m src.main --test-webhook                 # can it reach Discord
+python -m src.main --dry-run --run-once --verbose # what did the boards return, and why was each job kept or dropped
+```
+
+**Nothing arrives in Discord.** Run `--test-webhook`. If the sample job appears,
+the delivery path is fine and the problem is upstream of it. If it was the first
+run, that is intended; look for the "First run: recording N existing matches" line
+and check the channel for the "watching" message. Otherwise read the count lines:
+"0 jobs discovered" means the boards gave you nothing, while "0 of 240 jobs
+matched" means your filters are too narrow. Loosen one group at a time.
 
 **`Discord rejected the webhook (HTTP 404)`.** The webhook was deleted, or the URL
 is wrong or truncated. Create a new one.
@@ -421,16 +559,15 @@ keep working. This project does not try to get around blocks.
 Greenhouse and Lever, the company handle is wrong. Take it from the company's
 careers URL: `job-boards.greenhouse.io/THIS_BIT` or `jobs.lever.co/THIS_BIT`.
 Companies also move between hiring systems, so a handle that used to work can stop.
+Check a corrected one on its own with `--only greenhouse --dry-run --run-once`.
 
 **A source reports 0 jobs but no error.** Look for "is unchanged since the last
 check". Nothing changed since last time, so it was not downloaded again.
 
 **The same job keeps arriving.** The board is publishing it with a new id or URL
-each time. Check `state.retention_days`; you can also confirm what was recorded
-with `sqlite3 data/state.sqlite3 "select board, title, company from sent_jobs"`.
-
-**I want to start over.** Stop it and delete the state file. Everything currently
-open will be treated as new, so expect the first-run behaviour again.
+each time, so it looks like a different posting. Check `state.retention_days`, and
+confirm what was actually recorded with the query under
+[Everyday commands](#everyday-commands).
 
 **`State file ... is unusable; starting a fresh one`.** The file was corrupted,
 probably by an abrupt shutdown. It is moved to `.corrupt` and a new one is created.

@@ -23,7 +23,7 @@ from . import sources as sources_module
 from .config import ConfigError
 from .http_client import HttpClient
 from .matching import best_match
-from .notify import Notifier
+from .notify import Notifier, send_test_message
 from .state import Store
 
 log = logging.getLogger("jobjacker")
@@ -72,12 +72,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--test-config", action="store_true", help="validate the config and exit without fetching"
     )
     parser.add_argument(
+        "--test-webhook",
+        action="store_true",
+        help="post a sample job to Discord to check the webhook, then exit",
+    )
+    parser.add_argument(
+        "--only",
+        metavar="BOARD",
+        action="append",
+        help="check just this board, ignoring the others (repeatable), e.g. --only linkedin",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="log the jobs that would be sent instead of sending them, and leave the state file alone",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="log debug detail")
     return parser.parse_args(argv)
+
+
+def select_sources(sources, only):
+    """Narrow the configured sources to the boards named with --only."""
+    if not only:
+        return tuple(sources)
+    wanted = {name.strip().lower() for name in only}
+    return tuple(source for source in sources if source.board in wanted)
 
 
 def run_cycle(cfg, sources, store: Store, notifier: Notifier) -> bool:
@@ -241,6 +260,24 @@ def main(argv: list[str] | None = None) -> int:
     notifier = Notifier(cfg.webhook_url, session, dry_run=args.dry_run)
 
     try:
+        if args.test_webhook:
+            log.info("Checking the Discord webhook with a sample job")
+            if not send_test_message(notifier):
+                log.error("The sample job was not delivered; see the error above")
+                return 1
+            if not args.dry_run:
+                log.info("Sent. Look in the channel the webhook points at.")
+            return 0
+
+        selected = select_sources(cfg.sources, args.only)
+        if not selected:
+            log.error(
+                "--only %s matched none of the configured boards. Configured: %s",
+                ", ".join(args.only),
+                ", ".join(sorted({source.board for source in cfg.sources})),
+            )
+            return 1
+
         with Store(cfg.state_path) as store:
             client = HttpClient(
                 user_agent=cfg.http.user_agent,
@@ -252,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
                 validators=None if args.dry_run else store,
             )
             try:
-                built = sources_module.build_all(cfg.sources, client)
+                built = sources_module.build_all(selected, client)
             except ConfigError as exc:
                 log.error("Configuration problem: %s", exc)
                 return 1

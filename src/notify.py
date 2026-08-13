@@ -10,8 +10,12 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import datetime, timezone
 
 import requests
+
+from .matching import MatchResult
+from .models import Job
 
 log = logging.getLogger(__name__)
 
@@ -186,6 +190,31 @@ def build_embed(job, match) -> dict:
     if job.company_logo.startswith("https://"):
         embed["thumbnail"] = {"url": job.company_logo}
     return embed
+
+
+def send_test_message(notifier: Notifier) -> bool:
+    """Post one made-up job so the webhook can be checked before relying on it.
+
+    This is what `--test-webhook` sends. It doubles as a preview of the formatting.
+    """
+    job = Job(
+        board="linkedin",
+        title="Security Analyst (sample posting)",
+        company="Example Company",
+        location="Toronto, Ontario, Canada",
+        url="https://example.com/jobs/sample",
+        description=(
+            "This is a test notification from Job Jacker. If you can read this, the "
+            "webhook works and real matches will arrive looking like this."
+        ),
+        employment_type="full-time",
+        salary_min=85000,
+        salary_max=95000,
+        salary_currency="CAD",
+        posted_at=datetime.now(timezone.utc),
+    )
+    match = MatchResult(matched=True, score=7, search_name="webhook test")
+    return bool(notifier.send([(job, match)]))
 
 
 def _board_label(job) -> str:

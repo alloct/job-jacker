@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.config import Config, Filters, Search
-from src.main import run_cycle
+from src.config import Config, Filters, Search, SourceSettings
+from src.main import run_cycle, select_sources
 from src.models import Job
 from src.notify import Notifier
 from src.sources import Source
@@ -186,6 +186,25 @@ class CycleTests(unittest.TestCase):
         source = FakeSource([titleless, linkless, make_job(1)])
         self.assertTrue(run_cycle(make_config(), [source], self.store, self.notifier))
         self.assertEqual(self.sent_titles(), ["Security Analyst"])
+
+
+class CommandLineTests(unittest.TestCase):
+    def test_only_narrows_the_boards_that_run(self):
+        configured = (
+            SourceSettings(board="linkedin", options={}),
+            SourceSettings(board="rss", options={}),
+            SourceSettings(board="remotive", options={}),
+        )
+        chosen = select_sources(configured, ["LinkedIn", " rss "])
+        self.assertEqual([source.board for source in chosen], ["linkedin", "rss"])
+
+    def test_without_only_every_board_runs(self):
+        configured = (SourceSettings(board="linkedin", options={}),)
+        self.assertEqual(select_sources(configured, None), configured)
+
+    def test_a_board_that_is_not_configured_selects_nothing(self):
+        configured = (SourceSettings(board="linkedin", options={}),)
+        self.assertEqual(select_sources(configured, ["indeed"]), ())
 
 
 def _ok():

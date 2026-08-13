@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from src.matching import MatchResult
 from src.models import Job
-from src.notify import EMBEDS_PER_MESSAGE, Notifier, build_embed
+from src.notify import EMBEDS_PER_MESSAGE, Notifier, build_embed, send_test_message
 
 WEBHOOK = "https://discord.com/api/webhooks/123456789/SUPER-SECRET-TOKEN"
 
@@ -178,6 +178,19 @@ class SendTests(unittest.TestCase):
         cleaned = notifier.redact(f"POST {WEBHOOK} failed; token SUPER-SECRET-TOKEN rejected")
         self.assertNotIn("SUPER-SECRET-TOKEN", cleaned)
         self.assertNotIn(WEBHOOK, cleaned)
+
+    def test_the_webhook_test_posts_a_sample_embed(self):
+        session = FakeSession()
+        self.assertTrue(send_test_message(Notifier(WEBHOOK, session)))
+        _url, payload = session.calls[0]
+        embed = payload["embeds"][0]
+        self.assertIn("sample", embed["title"].lower())
+        self.assertIn("test notification", embed["description"].lower())
+
+    def test_a_broken_webhook_makes_the_test_fail(self):
+        session = FakeSession([FakeResponse(status_code=401, text="unauthorized")])
+        with self.assertLogs("src.notify", level="ERROR"):
+            self.assertFalse(send_test_message(Notifier(WEBHOOK, session)))
 
     def test_error_body_from_discord_is_redacted(self):
         session = FakeSession([FakeResponse(status_code=400, text=f"bad request for {WEBHOOK}")])
