@@ -19,10 +19,12 @@ job boards -> normalize -> filter -> deduplicate -> Discord
 - [Installation](#installation)
 - [Discord setup](#discord-setup)
 - [Configuration](#configuration)
+- [Turning boards on and off](#turning-boards-on-and-off)
 - [How matching works](#how-matching-works)
 - [Running it](#running-it)
 - [Running with Docker](#running-with-docker)
 - [Everyday commands](#everyday-commands)
+- [Clearing what it remembers](#clearing-what-it-remembers)
 - [Adding a job source](#adding-a-job-source)
 - [Troubleshooting](#troubleshooting)
 - [How it behaves toward job boards](#how-it-behaves-toward-job-boards)
@@ -62,6 +64,10 @@ If a board fails, the failure is logged and the cycle carries on with the others
 | `greenhouse` | One company at a time, if it hires through Greenhouse | The company's board name |
 | `lever` | One company at a time, if it hires through Lever | The company's handle |
 | `adzuna` | Aggregated listings across many boards and employers | A free API key |
+
+Indeed is not on that list, and neither are Glassdoor and ZipRecruiter.
+[Here is why](#why-indeed-is-not-supported). Use `adzuna` for the same kind of
+broad coverage.
 
 Everything except `linkedin` and `rss` uses a documented JSON API. `rss` reads a
 feed the site publishes for this purpose. LinkedIn is the only source that parses
@@ -198,6 +204,54 @@ plenty for a job hunt.
 Any string in the file can be `${SOME_VARIABLE}` and it will be read from the
 environment, which is how the Adzuna keys stay out of the file.
 
+## Turning boards on and off
+
+**To stop using a board for good**, delete its `- board:` entry from `sources`.
+
+**To keep the settings but skip the board**, add `enabled: false` to the entry.
+That is how `config.example.yaml` ships Greenhouse, Lever and Adzuna: the entries
+are there with working examples, ignored until you flip them on.
+
+```yaml
+sources:
+  - board: linkedin           # active
+    locations:
+      - "Ontario, Canada"
+
+  - board: adzuna             # configured, but skipped
+    enabled: false
+    country: ca
+    app_id: "${ADZUNA_APP_ID}"
+    app_key: "${ADZUNA_APP_KEY}"
+```
+
+A disabled entry is not validated, so it is fine to leave a half-finished one in
+the file. Missing settings and unset environment variables inside it will not stop
+startup. Remove the `enabled: false` line, or set it to `true`, when you are ready.
+
+**For a single run**, `--only` narrows things down without editing the file:
+
+```bash
+python -m src.main --only remotive --run-once
+```
+
+It takes the `board:` name rather than the display name, so `--only rss` covers
+every feed you have configured. It can only choose among the boards that are
+enabled; it will not wake a disabled one up.
+
+After any change, `--test-config` lists exactly what will be used:
+
+```
+  Sources (2):
+      - LinkedIn
+      - Remotive
+```
+
+At least one board has to be enabled; turning them all off is rejected with
+`every source is disabled; enable at least one`. Turning a board off does not lose
+its history, so switching it back on will not resend jobs you have already had,
+unless they have aged past `state.retention_days` in the meantime.
+
 ## How matching works
 
 Each filter group takes `include`, `exclude`, or both:
@@ -250,6 +304,8 @@ That runs until you stop it with Ctrl+C. The flags:
 | `--run-once` | One cycle, then exit |
 | `--dry-run` | Log what would be sent; send nothing, save nothing |
 | `--only BOARD` | Check just that board. Repeatable |
+| `--forget-jobs` | Clear the record of jobs already sent, then exit |
+| `--clear-http-cache` | Clear the stored ETags, then exit |
 | `--verbose` | Debug detail, including why each job was kept or dropped |
 | `--config PATH` | Use a config file other than `./config.yaml` |
 
@@ -431,26 +487,78 @@ Compare your `config.yaml` against `config.example.yaml` after an update to see
 whether new options appeared. Unknown keys are rejected rather than ignored, so a
 config that validates is a config the new version fully understands.
 
-**See what it has already sent.** This needs the `sqlite3` command-line tool, which
-is a separate download from the Python module of the same name.
+## Clearing what it remembers
+
+The state file holds two separate things, and they are cleared separately.
+
+| What | Why you would clear it | Effect |
+| --- | --- | --- |
+| Sent jobs | You want postings you have already been shown to come through again | Everything currently open counts as new |
+| HTTP cache | A board keeps reporting "unchanged since the last check" and you want a full download | The next cycle downloads every list in full |
+
+Neither command needs a webhook or network access, and neither is affected by a
+board being unreachable.
+
+**Clear the record of sent jobs.** Everything open at the boards you watch becomes
+new again:
+
+```bash
+python -m src.main --forget-jobs
+docker compose run --rm job-jacker --forget-jobs
+```
+
+It reports what it removed:
+
+```
+[15:26:55] Forgot 2 sent job(s). The next run starts from scratch, which means the first-run rules apply again.
+```
+
+Read that last part before you use it. An empty record means the next run is a
+first run, so by default it quietly re-records everything instead of posting it,
+and you are back where you started with nothing announced. To actually receive
+those jobs again, set `notify_on_first_run: true` before the next cycle.
+
+**Clear the HTTP cache**, which is the ETags and Last-Modified values that let
+boards answer "nothing changed" instead of resending a list:
+
+```bash
+python -m src.main --clear-http-cache
+docker compose run --rm job-jacker --clear-http-cache
+```
+
+This never causes duplicate notifications. Redownloading a list you already have
+just means every job in it is recognised and skipped. It also happens on its own
+after any cycle that failed to deliver something, so a cached "nothing changed"
+cannot hide a job you never received.
+
+**Clear both, or start from an empty file.** Combine the flags, or stop it and
+delete the file:
+
+```bash
+python -m src.main --forget-jobs --clear-http-cache
+rm data/state.sqlite3*                    # del data\state.sqlite3* on Windows
+```
+
+Deleting the file does the same thing as both flags together. Use the flags while
+something is running, and the delete when you would rather not think about it. The
+`*` matters: SQLite keeps `-wal` and `-shm` companions next to the database.
+
+**Forget one job instead of all of them.** For this you need the `sqlite3`
+command-line tool, which is a separate download from the Python module of the same
+name. Look before you delete:
 
 ```bash
 sqlite3 data/state.sqlite3 "select sent_at, board, company, title from sent_jobs order by sent_at desc limit 20;"
-```
-
-**Make it forget one job** so the next cycle announces it again:
-
-```bash
 sqlite3 data/state.sqlite3 "delete from sent_jobs where title like '%Security Analyst%';"
+sqlite3 data/state.sqlite3 "delete from sent_jobs where board = 'linkedin';"
 ```
 
-**Start over completely.** Stop it first, then delete the state file. The next run
-is treated as a first run, so it records everything currently open without posting
-it.
+Deleting a single row does not trigger the first-run behaviour, so those jobs are
+simply announced again on the next cycle. This is the one case that needs SQL;
+everything else has a flag.
 
-```bash
-rm data/state.sqlite3*                    # del data\state.sqlite3* on Windows
-```
+Sent jobs also expire on their own after `state.retention_days`, 90 by default. A
+posting that has been down that long can be announced again if it comes back.
 
 ## Adding a job source
 
@@ -549,8 +657,9 @@ is wrong or truncated. Create a new one.
 **`HTTP 403 (blocked; this source may no longer allow unauthenticated access)`.**
 That board is refusing anonymous requests. If it is LinkedIn, increase
 `interval_minutes`, reduce `max_queries`, and put a real contact URL in
-`http.user_agent`. If it persists, set `enabled: false` on that source; the others
-keep working. This project does not try to get around blocks.
+`http.user_agent`. If it persists,
+[turn that source off](#turning-boards-on-and-off); the others keep working. This
+project does not try to get around blocks.
 
 **`HTTP 429`.** You are polling too often. The client already honours
 `Retry-After`, but raise `interval_minutes` and lower `max_queries` and `pages`.
@@ -562,12 +671,13 @@ Companies also move between hiring systems, so a handle that used to work can st
 Check a corrected one on its own with `--only greenhouse --dry-run --run-once`.
 
 **A source reports 0 jobs but no error.** Look for "is unchanged since the last
-check". Nothing changed since last time, so it was not downloaded again.
+check". Nothing changed since last time, so it was not downloaded again. If you
+believe that is wrong, `--clear-http-cache` forces a full download next cycle.
 
 **The same job keeps arriving.** The board is publishing it with a new id or URL
 each time, so it looks like a different posting. Check `state.retention_days`, and
 confirm what was actually recorded with the query under
-[Everyday commands](#everyday-commands).
+[Clearing what it remembers](#clearing-what-it-remembers).
 
 **`State file ... is unusable; starting a fresh one`.** The file was corrupted,
 probably by an abrupt shutdown. It is moved to `.corrupt` and a new one is created.

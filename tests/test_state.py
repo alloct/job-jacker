@@ -92,6 +92,19 @@ class StoreTests(unittest.TestCase):
             self.assertTrue(store.has_seen(recent.fingerprint()))
             self.assertFalse(store.has_seen(ancient.fingerprint()))
 
+    def test_forgetting_everything_empties_the_sent_record(self):
+        with Store(self.path) as store:
+            store.mark_seen([make_job(), make_job(external_id="other")])
+            store.set_validators("https://example.com/feed", '"etag-1"', None)
+            self.assertEqual(store.forget_all(), 2)
+            self.assertTrue(store.is_empty())
+            # Only the sent jobs go; cached validators are a separate concern.
+            self.assertEqual(store.get_validators("https://example.com/feed"), ('"etag-1"', None))
+
+    def test_forgetting_an_empty_record_is_harmless(self):
+        with Store(self.path) as store:
+            self.assertEqual(store.forget_all(), 0)
+
     def test_a_corrupt_state_file_is_replaced_instead_of_crashing(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_bytes(b"this is not a database" * 100)
@@ -109,8 +122,11 @@ class StoreTests(unittest.TestCase):
                 store.get_validators("https://example.com/feed"),
                 ('"etag-1"', "Wed, 21 Oct 2026 07:28:00 GMT"),
             )
-            store.clear_validators()
+            store.mark_seen([make_job()])
+            self.assertEqual(store.clear_validators(), 1)
             self.assertEqual(store.get_validators("https://example.com/feed"), (None, None))
+            # Clearing the cache must not touch what has already been sent.
+            self.assertEqual(store.count(), 1)
 
     def test_unknown_url_has_no_validators(self):
         with Store(self.path) as store:

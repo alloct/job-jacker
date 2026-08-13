@@ -83,6 +83,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="check just this board, ignoring the others (repeatable), e.g. --only linkedin",
     )
     parser.add_argument(
+        "--forget-jobs",
+        action="store_true",
+        help="clear the record of jobs already sent, so they can be sent again, then exit",
+    )
+    parser.add_argument(
+        "--clear-http-cache",
+        action="store_true",
+        help="clear the stored ETags, so every list is downloaded again, then exit",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="log the jobs that would be sent instead of sending them, and leave the state file alone",
@@ -243,12 +253,34 @@ def describe(cfg, sources) -> None:
         print(f"  Search-based boards will query for: {', '.join(terms)}")
 
 
+def clear_state(args, store) -> int:
+    """Handle the flags that only empty part of the state file, then exit."""
+    if args.dry_run:
+        log.info("Dry run: the state file was left alone")
+        return 0
+    if args.forget_jobs:
+        log.info(
+            "Forgot %d sent job(s). The next run starts from scratch, which means the "
+            "first-run rules apply again.",
+            store.forget_all(),
+        )
+    if args.clear_http_cache:
+        log.info(
+            "Cleared %d cached validator(s). Every list will be downloaded in full next run.",
+            store.clear_validators(),
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     setup_logging("DEBUG" if args.verbose else "INFO")
 
+    # Emptying the state file needs no webhook and no reachable board.
+    housekeeping = args.forget_jobs or args.clear_http_cache
+
     try:
-        cfg = config_module.load(args.config, require_webhook=not args.dry_run)
+        cfg = config_module.load(args.config, require_webhook=not (args.dry_run or housekeeping))
     except ConfigError as exc:
         log.error("Configuration problem: %s", exc)
         return 1
@@ -268,6 +300,10 @@ def main(argv: list[str] | None = None) -> int:
             if not args.dry_run:
                 log.info("Sent. Look in the channel the webhook points at.")
             return 0
+
+        if housekeeping:
+            with Store(cfg.state_path) as store:
+                return clear_state(args, store)
 
         selected = select_sources(cfg.sources, args.only)
         if not selected:

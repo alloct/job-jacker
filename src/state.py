@@ -133,6 +133,12 @@ class Store:
     def count(self) -> int:
         return int(self.connection.execute("SELECT COUNT(*) FROM sent_jobs").fetchone()[0])
 
+    def forget_all(self) -> int:
+        """Empty the sent-job record, so everything still open counts as new again."""
+        with self.connection:
+            cursor = self.connection.execute("DELETE FROM sent_jobs")
+        return cursor.rowcount or 0
+
     def get_validators(self, url: str) -> tuple[str | None, str | None]:
         row = self.connection.execute(
             "SELECT etag, last_modified FROM http_cache WHERE url = ?", (url,)
@@ -150,11 +156,12 @@ class Store:
                 (url, etag, last_modified),
             )
 
-    def clear_validators(self) -> None:
+    def clear_validators(self) -> int:
         """Force full refetching next cycle.
 
         Called after any cycle that failed to deliver something, so a cached 304
         can never hide a job we have not sent yet.
         """
         with self.connection:
-            self.connection.execute("DELETE FROM http_cache")
+            cursor = self.connection.execute("DELETE FROM http_cache")
+        return cursor.rowcount or 0

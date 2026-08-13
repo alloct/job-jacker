@@ -113,6 +113,26 @@ class ConfigTests(unittest.TestCase):
         cfg = config_module.load(self.write(text))
         self.assertEqual([source.board for source in cfg.sources], ["remotive"])
 
+    def test_an_enabled_source_keeps_running(self):
+        text = MINIMAL.replace("  - board: remotive", "  - board: remotive\n    enabled: true")
+        cfg = config_module.load(self.write(text))
+        self.assertEqual([source.board for source in cfg.sources], ["remotive"])
+
+    def test_a_disabled_source_is_not_validated(self):
+        """Half-finished entries can sit in the file, which is how boards get parked."""
+        text = MINIMAL.replace(
+            "  - board: remotive",
+            "  - board: remotive\n  - board: greenhouse\n    enabled: false\n    nonsense: yes",
+        )
+        cfg = config_module.load(self.write(text))
+        self.assertEqual([source.board for source in cfg.sources], ["remotive"])
+
+    def test_disabling_every_source_is_an_error(self):
+        text = MINIMAL.replace("  - board: remotive", "  - board: remotive\n    enabled: false")
+        with self.assertRaises(ConfigError) as caught:
+            config_module.load(self.write(text))
+        self.assertIn("every source is disabled", str(caught.exception))
+
     def test_query_terms_are_deduplicated_across_searches(self):
         text = MINIMAL + """
   - name: Second

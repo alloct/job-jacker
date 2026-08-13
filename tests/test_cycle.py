@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from src.config import Config, Filters, Search, SourceSettings
-from src.main import run_cycle, select_sources
+from src.main import clear_state, parse_args, run_cycle, select_sources
 from src.models import Job
 from src.notify import Notifier
 from src.sources import Source
@@ -205,6 +205,42 @@ class CommandLineTests(unittest.TestCase):
     def test_a_board_that_is_not_configured_selects_nothing(self):
         configured = (SourceSettings(board="linkedin", options={}),)
         self.assertEqual(select_sources(configured, ["indeed"]), ())
+
+
+class ClearStateTests(unittest.TestCase):
+    def setUp(self):
+        self._directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self._directory.cleanup)
+        self.store = Store(Path(self._directory.name) / "state.sqlite3")
+        self.addCleanup(self.store.close)
+        self.store.mark_seen([make_job(1)])
+        self.store.set_validators("https://example.com/feed", '"etag-1"', None)
+
+    def test_both_flags_empty_both_tables(self):
+        args = parse_args(["--forget-jobs", "--clear-http-cache"])
+        with self.assertLogs("jobjacker", level="INFO"):
+            self.assertEqual(clear_state(args, self.store), 0)
+        self.assertTrue(self.store.is_empty())
+        self.assertEqual(self.store.get_validators("https://example.com/feed"), (None, None))
+
+    def test_forgetting_jobs_keeps_the_http_cache(self):
+        with self.assertLogs("jobjacker", level="INFO"):
+            clear_state(parse_args(["--forget-jobs"]), self.store)
+        self.assertTrue(self.store.is_empty())
+        self.assertEqual(self.store.get_validators("https://example.com/feed"), ('"etag-1"', None))
+
+    def test_clearing_the_http_cache_keeps_the_sent_jobs(self):
+        with self.assertLogs("jobjacker", level="INFO"):
+            clear_state(parse_args(["--clear-http-cache"]), self.store)
+        self.assertEqual(self.store.count(), 1)
+        self.assertEqual(self.store.get_validators("https://example.com/feed"), (None, None))
+
+    def test_a_dry_run_clears_nothing(self):
+        args = parse_args(["--forget-jobs", "--clear-http-cache", "--dry-run"])
+        with self.assertLogs("jobjacker", level="INFO") as logs:
+            clear_state(args, self.store)
+        self.assertIn("left alone", " ".join(logs.output))
+        self.assertEqual(self.store.count(), 1)
 
 
 def _ok():
