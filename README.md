@@ -187,7 +187,7 @@ searches:
       currency: CAD
 ```
 
-Two notes on the layout.
+Three notes on the layout.
 
 `sources` says **where** to look. `searches` says **what counts as a match**.
 Every source is filtered by every search, so adding a board does not mean
@@ -197,6 +197,19 @@ repeating your filters.
 the boards that have one (LinkedIn and Adzuna), and it is also used to filter
 what comes back. Boards that just hand over their whole list (Remotive, Remote OK,
 feeds, Greenhouse, Lever) ignore it for searching and only use it for filtering.
+
+**Search wide, filter narrow.** `locations` under a source sets the scope of the
+search it runs; `locations` under a search filters what came back. Narrowing the
+first one loses jobs you will never see, because a job LinkedIn labels `Canada`
+does not appear in a search for `Ontario, Canada`, and country-level labels are
+normal for remote roles. Search `Canada` and let `searches.locations` pick out
+`Ontario`, `Toronto` and `Remote`. The same applies to Adzuna's `where`.
+
+Extra locations are not free either: LinkedIn and Adzuna run one search per title
+per location, and anything beyond `max_queries` is skipped. Eight titles across two
+locations is sixteen searches against a default cap of eight, so half of them,
+including everything for the second location, would not happen. The log says so
+when it happens.
 
 Set `interval_minutes` to at least 5; anything lower is rejected. Hourly is
 plenty for a job hunt.
@@ -683,6 +696,14 @@ Check a corrected one on its own with `--only greenhouse --dry-run --run-once`.
 **A source reports 0 jobs but no error.** Look for "is unchanged since the last
 check". Nothing changed since last time, so it was not downloaded again. If you
 believe that is wrong, `--clear-http-cache` forces a full download next cycle.
+
+**A job you can see on the board never appears at all.** It was never fetched, so
+no filter is involved and `--verbose` will not mention it. On LinkedIn and Adzuna,
+check the source's `locations` before anything else: the search is scoped to what
+you put there, and a posting labelled `Canada` will not come back from a search for
+`Ontario, Canada`. Then check `posted_within_days`, and `pages`, since one page is
+ten results per title, newest first. Confirm with a search on the board itself for
+the same title in the same location.
 
 **Too few jobs match.** Every step that discards a job says why, so work down the
 log. `--verbose` adds one line per rejected job, which is the quickest way to see

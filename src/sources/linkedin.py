@@ -60,11 +60,16 @@ class LinkedInSource(Source):
         failures = 0
         queries = [(term, location) for location in self.locations for term in terms]
         if len(queries) > self.max_queries:
-            log.debug(
-                "LinkedIn: %d term/location combinations exceed max_queries=%d; using the first %d",
+            # Skipping searches silently is how jobs go missing without explanation.
+            log.warning(
+                "LinkedIn: %d titles across %d location(s) needs %d searches, but max_queries "
+                "is %d, so %d are skipped this cycle. Raise max_queries, or search one broad "
+                "location and narrow it down with searches.locations.",
+                len(terms),
+                len(self.locations),
                 len(queries),
                 self.max_queries,
-                self.max_queries,
+                len(queries) - self.max_queries,
             )
             queries = queries[: self.max_queries]
 

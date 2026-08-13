@@ -91,6 +91,26 @@ class LinkedInTests(unittest.TestCase):
         job = linkedin.parse_search_fragment(LINKEDIN_FRAGMENT)[0]
         self.assertFalse(linkedin.apply_detail_page(job, "<html>{not json}</html>"))
 
+    def test_searches_beyond_the_cap_are_skipped_out_loud(self):
+        """Silently dropping searches is indistinguishable from a board hiding jobs."""
+
+        class CountingSource(linkedin.LinkedInSource):
+            def __init__(self, *args, **kwargs):
+                self.searched = []
+                super().__init__(*args, **kwargs)
+
+            def _search(self, term, location):
+                self.searched.append((term, location))
+                return []
+
+        source = CountingSource(None, {"locations": ["Canada", "Ireland"], "max_queries": 3})
+        with self.assertLogs("src.sources.linkedin", level="WARNING") as logs:
+            source.fetch(["SOC Analyst", "Security Analyst", "Security Engineer"])
+        self.assertEqual(len(source.searched), 3)
+        # The whole of the second location is what gets dropped, which is worth saying.
+        self.assertEqual({location for _term, location in source.searched}, {"Canada"})
+        self.assertIn("max_queries", " ".join(logs.output))
+
 
 class GreenhouseTests(unittest.TestCase):
     payload = {

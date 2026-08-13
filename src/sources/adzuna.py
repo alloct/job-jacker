@@ -58,7 +58,19 @@ class AdzunaSource(Source):
             return []
 
         jobs: dict[str, Job] = {}
-        queries = [(term, where) for where in self.where for term in terms][: self.max_queries]
+        queries = [(term, where) for where in self.where for term in terms]
+        if len(queries) > self.max_queries:
+            # Skipping searches silently is how jobs go missing without explanation.
+            log.warning(
+                "Adzuna: %d titles across %d place(s) needs %d searches, but max_queries is "
+                "%d, so %d are skipped this cycle. Raise max_queries, or use fewer places.",
+                len(terms),
+                len(self.where),
+                len(queries),
+                self.max_queries,
+                len(queries) - self.max_queries,
+            )
+            queries = queries[: self.max_queries]
         failures = 0
         for term, where in queries:
             params = {

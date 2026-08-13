@@ -51,10 +51,13 @@ sources:
   # This is the source most likely to break or start rate limiting. If it does,
   # the failure is logged and the other sources still run.
   - board: linkedin
-    # Whatever you would type in LinkedIn's location box.
+    # What you would type in LinkedIn's location box. This is the scope of the
+    # search, not a filter, so keep it broad: a job LinkedIn labels "Canada" does
+    # not come back from a search for "Ontario, Canada", and country-level labels
+    # are common for remote roles. Narrow the results with searches.locations
+    # further down instead of narrowing them here.
     locations:
-      - "Ontario, Canada"
-      - "Toronto, Ontario, Canada"
+      - "Canada"
     posted_within_days: 7
     pages: 1
     # Read each new posting's public page once to get its description, employment
@@ -63,7 +66,8 @@ sources:
     # Set to false for fewer requests, at the cost of not being able to filter
     # LinkedIn jobs on keywords.
     fetch_details: true
-    # Safety valve: titles x locations can multiply quickly.
+    # Safety valve. One search per title per location, so titles x locations is
+    # what counts here. Anything over this cap is skipped, with a warning saying so.
     max_queries: 8
 
   # Remote-only boards with free public APIs. Need no setup.
