@@ -1,0 +1,33 @@
+# Your real config holds the Discord webhook URL. Never commit it..... >_<
+config.yaml
+config.yml
+*.local.yaml
+
+# Deduplication state and logs
+data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3.corrupt
+*.log
+
+# Environment files
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

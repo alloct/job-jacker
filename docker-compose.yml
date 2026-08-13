@@ -1,0 +1,13 @@
+services:
+  job-jacker:
+    build: .
+    image: job-jacker:latest
+    container_name: job-jacker
+    restart: unless-stopped
+    environment:
+      # Keep the webhook out of config.yaml on servers. Put it in a .env file
+      # next to this one: DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data

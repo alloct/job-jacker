@@ -1,0 +1,175 @@
+# Job Jacker configuration.
+#
+# Copy this file to config.yaml and edit it. config.yaml is in .gitignore because
+# it holds your Discord webhook URL, which anyone can post to if they have it.
+#
+# Every value below is optional except: discord.webhook_url (or the
+# DISCORD_WEBHOOK_URL environment variable), sources, and searches.
+
+# How often to check. Minimum 5 minutes. Hourly is plenty for most job hunts and
+# is much kinder to the boards.
+interval_minutes: 60
+
+discord:
+  # Server Settings > Integrations > Webhooks > New Webhook > Copy Webhook URL.
+  # Leave the placeholder and set DISCORD_WEBHOOK_URL instead if you prefer, which
+  # is the better option on a server or in Docker.
+  webhook_url: "REPLACE_WITH_YOUR_DISCORD_WEBHOOK_URL"
+
+# Send the first batch immediately on a brand new state file. Off by default so
+# that starting up does not dump every currently open job into your channel; you
+# get one short "watching" message instead.
+notify_on_first_run: false
+
+http:
+  # Put your own contact or repository URL here. A board that can see who you are
+  # is less likely to block you.
+  user_agent: "job-jacker/1.0 (+https://github.com/YOUR_NAME/job-jacker)"
+  timeout_seconds: 20
+  # Pause between requests. Do not set this to 0; there is no hurry.
+  delay_seconds: 2
+  max_retries: 2
+
+state:
+  path: data/state.sqlite3
+  # Forget jobs after this long so the file stays small. If a posting is still up
+  # after this many days it can be announced again.
+  retention_days: 90
+
+log:
+  level: INFO # DEBUG, INFO, WARNING or ERROR
+  # file: data/job-jacker.log
+
+# ---------------------------------------------------------------------------
+# Where to look. Remove anything you do not want; add "enabled: false" to keep
+# an entry in the file without using it.
+#
+# Boards marked "needs no setup" work as soon as you enable them.
+# ---------------------------------------------------------------------------
+sources:
+  # LinkedIn's public, logged-out job search. Needs no setup.
+  # This is the source most likely to break or start rate limiting. If it does,
+  # the failure is logged and the other sources still run.
+  - board: linkedin
+    # Whatever you would type in LinkedIn's location box.
+    locations:
+      - "Ontario, Canada"
+      - "Toronto, Ontario, Canada"
+    posted_within_days: 7
+    pages: 1
+    # Read each new posting's public page once to get its description, employment
+    # type and salary, which the results list does not include. Only happens for
+    # jobs that are new and already match on title, company and location.
+    # Set to false for fewer requests, at the cost of not being able to filter
+    # LinkedIn jobs on keywords.
+    fetch_details: true
+    # Safety valve: titles x locations can multiply quickly.
+    max_queries: 8
+
+  # Remote-only boards with free public APIs. Need no setup.
+  - board: remotive
+  - board: remoteok
+
+  # Any board that publishes a feed. Needs no setup beyond the URL.
+  - board: rss
+    feeds:
+      - name: We Work Remotely
+        url: https://weworkremotely.com/remote-jobs.rss
+
+  # Companies that host hiring on Greenhouse. The token is the name in the URL of
+  # their careers page: job-boards.greenhouse.io/THIS_BIT
+  - board: greenhouse
+    enabled: false
+    companies:
+      - gitlab
+
+  # Companies that host hiring on Lever: jobs.lever.co/THIS_BIT
+  - board: lever
+    enabled: false
+    companies:
+      - leverdemo
+
+  # Aggregated listings through an official API. Free key from
+  # https://developer.adzuna.com. This is the supported way to get broad
+  # aggregator coverage; see README for why Indeed is not available.
+  - board: adzuna
+    enabled: false
+    country: ca
+    app_id: "${ADZUNA_APP_ID}"
+    app_key: "${ADZUNA_APP_KEY}"
+    where:
+      - "Toronto, Ontario"
+    max_days_old: 7
+
+# ---------------------------------------------------------------------------
+# What counts as a match.
+#
+# Every include/exclude list below must be satisfied, so they narrow results
+# together. Titles, companies and locations are checked strictly. Descriptions,
+# employment types and salaries are often missing from a listing, and a filter on
+# a field the board did not publish is skipped instead of failing.
+#
+# Matching ignores case and punctuation and matches whole words or phrases:
+# "SOC" does not match "social", and "Microsoft Sentinel" matches
+# "microsoft-sentinel".
+#
+# titles.include does double duty: it is also what gets typed into the search
+# box on search-based boards (LinkedIn, Adzuna).
+# ---------------------------------------------------------------------------
+searches:
+  - name: Cybersecurity
+    titles:
+      include:
+        - SOC Analyst
+        - Security Analyst
+        - Cybersecurity Analyst
+        - Information Security Analyst
+        - Security Engineer
+      exclude:
+        - Senior
+        - Lead
+        - Principal
+        - Manager
+        - Director
+        - Sales
+
+    keywords:
+      include:
+        - SIEM
+        - EDR
+        - SOC
+        - MDR
+        - Microsoft Sentinel
+        - CrowdStrike
+        - incident response
+      exclude:
+        - unpaid
+        - commission only
+
+    locations:
+      include:
+        - Remote
+        - Ontario
+        - Toronto
+        - Canada
+      exclude:
+        - United States
+
+    employment_types:
+      include:
+        - Full-time
+
+    # companies:
+    #   include: [A company you want to work for]
+    #   exclude: [A recruiting agency you keep seeing]
+
+    # Only used when a board actually publishes a figure, and never used when the
+    # figure is the board's own estimate.
+    salary:
+      minimum: 70000
+      currency: CAD
+
+    # Optional gate on the match score: +3 title, +2 company, +1 location, and
+    # +1 for each keyword up to 5. Leave at 0 to accept anything that passes the
+    # filters above.
+    min_score: 0

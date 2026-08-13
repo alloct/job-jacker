@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.py[cod]
+data
+tests
+config.yaml
+config.yml
+.env
+.env.*
+*.log
+*.sqlite3*
+README.md
