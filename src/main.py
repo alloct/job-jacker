@@ -144,6 +144,7 @@ def run_cycle(cfg, sources, store: Store, notifier: Notifier) -> bool:
 
     # Cheap pass first: filter on the fields every board gives us for free.
     candidates = []
+    rejections: Counter = Counter()
     for source, jobs in fetched:
         for job in jobs:
             if not job.is_usable:
@@ -152,7 +153,14 @@ def run_cycle(cfg, sources, store: Store, notifier: Notifier) -> bool:
             result = best_match(job, cfg.searches)
             if result:
                 candidates.append((source, job, result))
+                continue
+            reason = rejection_reason(job, cfg.searches) or "no match"
+            rejections[reason] += 1
+            log.debug("%s at %s did not match: %s", job.title, job.company, reason)
     log.info("%d of %d jobs matched your searches", len(candidates), discovered)
+    if rejections and not candidates:
+        # Nothing to show for the whole cycle is the case that most needs explaining.
+        log.info("Why nothing matched: %s", _summarize(rejections))
 
     unsent = [item for item in candidates if not store.has_seen(item[1].fingerprint())]
     duplicates = len(candidates) - len(unsent)
@@ -185,10 +193,7 @@ def run_cycle(cfg, sources, store: Store, notifier: Notifier) -> bool:
             "%d %s stopped matching once the full posting was read: %s",
             len(dropped),
             "job" if len(dropped) == 1 else "jobs",
-            "; ".join(
-                reason if count == 1 else f"{reason} (x{count})"
-                for reason, count in counted.most_common()
-            ),
+            _summarize(counted),
         )
 
     if not confirmed:
@@ -224,6 +229,13 @@ def run_cycle(cfg, sources, store: Store, notifier: Notifier) -> bool:
         store.mark_seen([job for job, _ in delivered])
     _prune(store, cfg, dry_run)
     return len(delivered) == len(confirmed)
+
+
+def _summarize(reasons: Counter) -> str:
+    """Reasons ordered by how often they came up, most common first."""
+    return "; ".join(
+        reason if count == 1 else f"{reason} (x{count})" for reason, count in reasons.most_common()
+    )
 
 
 def _enrich(unsent) -> None:

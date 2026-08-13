@@ -657,8 +657,9 @@ python -m src.main --dry-run --run-once --verbose # what did the boards return, 
 the delivery path is fine and the problem is upstream of it. If it was the first
 run, that is intended; look for the "First run: recording N existing matches" line
 and check the channel for the "watching" message. Otherwise read the count lines:
-"0 jobs discovered" means the boards gave you nothing, while "0 of 240 jobs
-matched" means your filters are too narrow. Loosen one group at a time.
+"0 jobs discovered" means the boards gave you nothing, while "0 of 240 jobs matched"
+means your filters are too narrow, and the "Why nothing matched" line that follows
+it names the filters responsible.
 
 **`Discord rejected the webhook (HTTP 404)`.** The webhook was deleted, or the URL
 is wrong or truncated. Create a new one.
@@ -683,19 +684,37 @@ Check a corrected one on its own with `--only greenhouse --dry-run --run-once`.
 check". Nothing changed since last time, so it was not downloaded again. If you
 believe that is wrong, `--clear-http-cache` forces a full download next cycle.
 
+**Too few jobs match.** Every step that discards a job says why, so work down the
+log. `--verbose` adds one line per rejected job, which is the quickest way to see
+whether one filter is doing all the damage:
+
+```
+[17:21:59] DEBUG: Senior Security Analyst at Example did not match: excluded title: Senior
+[17:21:59] DEBUG: Analyst, Cyber Security at Dream did not match: no title match
+[17:21:59] 9 of 22 jobs matched your searches
+```
+
+`no title match` means `titles.include` needs another phrasing; boards title the
+same role a dozen ways, and matching is on whole words, so "Security Analyst" does
+not catch "Analyst, Cyber Security". `excluded title: Senior` is `titles.exclude`
+working as asked, which is worth checking if you are excluding a common word.
+
 **Jobs matched, but none were sent.** Two different things produce this, and the log
 distinguishes them. "N already sent previously, skipping" means you have had them
 before. "N jobs stopped matching once the full posting was read" means they passed
 on title, company and location, then failed once `fetch_details` fetched the
-description; the line names the filter responsible:
+description:
 
 ```
 [21:02:15] 1 job stopped matching once the full posting was read: no keyword match
 ```
 
 That is `keywords.include` doing its job, and it is the usual reason a search with a
-long keyword list sends almost nothing. Loosen or shorten that list, or set
-`fetch_details: false` to stop testing keywords against descriptions at all.
+long keyword list sends almost nothing: the posting has to contain at least one of
+your keywords. Shorten the list to the terms you actually insist on, or drop
+`keywords.include` and let titles do the filtering. Setting `fetch_details: false`
+also stops keywords being tested against descriptions, since a board that publishes
+no description has its keyword filter skipped.
 
 **`--forget-jobs` says it forgot 0.** The record was already empty, which is normal
 if no cycle has ever sent anything. `--test-config` shows the same number as `Jobs

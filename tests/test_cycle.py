@@ -177,6 +177,24 @@ class CycleTests(unittest.TestCase):
         self.assertIn("stopped matching once the full posting was read", output)
         self.assertIn("excluded keyword: EDR", output)
 
+    def test_a_cycle_with_no_matches_at_all_says_why(self):
+        source = FakeSource([make_job(1, title="Truck Driver"), make_job(2, title="Chef")])
+        with self.assertLogs("jobjacker", level="INFO") as logs:
+            run_cycle(make_config(), [source], self.store, self.notifier)
+        self.assertIn("Why nothing matched: no title match (x2)", " ".join(logs.output))
+
+    def test_the_reason_summary_is_quiet_when_something_matched(self):
+        source = FakeSource([make_job(1), make_job(2, title="Chef")])
+        with self.assertLogs("jobjacker", level="INFO") as logs:
+            run_cycle(make_config(), [source], self.store, self.notifier)
+        self.assertNotIn("Why nothing matched", " ".join(logs.output))
+
+    def test_every_rejected_job_is_explained_with_verbose(self):
+        source = FakeSource([make_job(1, title="Chef", company="Kitchen Co")])
+        with self.assertLogs("jobjacker", level="DEBUG") as logs:
+            run_cycle(make_config(), [source], self.store, self.notifier)
+        self.assertIn("Chef at Kitchen Co did not match: no title match", " ".join(logs.output))
+
     def test_nothing_is_explained_when_nothing_was_dropped(self):
         source = FakeSource([make_job(1)])
         with self.assertLogs("jobjacker", level="INFO") as logs:
